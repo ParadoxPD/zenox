@@ -1,7 +1,6 @@
 #!/bin/bash
 
-CONFIG_FILE="$XDG_CONFIG_HOME/.projinitrc"
-[[ -f "$CONFIG_FILE" ]] && source "$CONFIG_FILE"
+CONFIG_FILE="$XDG_CONFIG_HOME/zenox/.zenox.config.json"
 
 # --------------------------- Colors --------------------------- #
 RED='\033[0;31m'
@@ -29,13 +28,53 @@ expand_path() {
     realpath -m "$input"
 }
 
+show_help() {
+    echo -e "\n\n ${CYAN}Zenox - Interactive Project Initializer${NC}
+    ${BLUE}---------------------------------------${NC}
+    A Bash utility for quickly setting up new projects with interactive prompts,
+    preconfigured templates, and optional tmux integration.
+
+    ${YELLOW}USAGE:${NC}
+      zenox [OPTIONS]
+
+    ${YELLOW}OPTIONS:${NC}
+      ${GREEN}-h, --help${NC}       Show this help message and exit.
+      ${GREEN}-d, --debug${NC}      Enable debug mode (static banner, extra logs).
+      ${GREEN}-n, --dry-run${NC}    Show the commands that would run without executing them.
+
+    ${YELLOW}FEATURES:${NC}
+      • Interactive TUI selection for base directory, project type, and license.
+      • Language/framework templates:
+        ${GREEN}Node.js, Python (uv venv), Java, Go, Zig, Rust, Assembly,${NC}
+        ${GREEN}React (Vite), Elixir, OCaml, Flutter, PHP (Laravel),${NC}
+        ${GREEN}JavaScript, Arduino${NC}.
+      • Automatic README.md, .gitignore, and LICENSE creation.
+      • License templates fetched from GitHub API.
+      • Optional tmux session creation.
+      • Configurable defaults via ~/.config/.projinitrc.
+
+    ${YELLOW}CONFIGURATION (~/.config/.projinitrc):${NC}
+      DEFAULT_PROJECT_PATH=\"/path/to/projects\"
+      DEFAULT_INIT_TYPE=\"Go\"
+      DEFAULT_LICENSE=\"MIT\"
+
+    ${YELLOW}EXAMPLES:${NC}
+      zenox                # Start interactive flow
+      zenox -n             # Dry-run mode
+      zenox --debug        # Debug mode
+
+    ${YELLOW}DEPENDENCIES:${NC}
+      fzf, fd, realpath, jq, plus language-specific tools (npm, cargo, go, etc.)"
+}
+
 # --------------------- Flag Parser ---------------------------- #
 parse_flags() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
         -d | --debug) debug_flag=1 ;;
         -h | --help)
-            echo "Usage: $0 [-d | --debug]"
+            animate
+            show_help
             exit 0
             ;;
         -n | --dry-run) dry_run=1 ;;
@@ -115,6 +154,7 @@ init_go() {
         echo "[Dry Run] go mod init \"$project_name\""
     else
         go mod init "$project_name"
+        touch .air.toml
     fi
 }
 
@@ -200,6 +240,10 @@ init_arduino() {
         mkdir -p "$project_name"
         echo "// Arduino sketch" >"$project_name/$project_name.ino"
     fi
+}
+
+init_none() {
+    echo "No Type : Empty project"
 }
 
 initialize_project() {
@@ -411,7 +455,7 @@ else
 fi
 
 # Select project type
-types=(Node Python Java Go Zig Rust Assembly React Elixir OCaml Flutter PHP JavaScript Arduino)
+types=(Node Python Java Go Zig Rust Assembly React Elixir OCaml Flutter PHP JavaScript Arduino None)
 selected_type=$(printf "%s\n" "${types[@]}" | fzf --prompt="Select project type: " --height=15 --border --reverse --ansi)
 selected_type="${selected_type:-$DEFAULT_INIT_TYPE}"
 [[ -z "$selected_type" ]] && exit_process "No project type selected." "$project_dir"
