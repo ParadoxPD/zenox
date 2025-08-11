@@ -182,7 +182,4 @@ It borrows the spirit of my obsession with tooling and automation, combined with
 
 ```
 
----
-
-If you want, I can also make a **"Quick Commands Table"** in the README showing exactly what each initializer runs internally (like "`cargo init`", "`npm init -y`", etc.), so users can quickly see what’s under the hood. That might make it even more transparent and user-friendly.
 ```
