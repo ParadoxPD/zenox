@@ -172,7 +172,7 @@ myapp/
 ## 💡 Inspiration
 
 Zenox was inspired by the need to **start coding faster** without repetitive setup.
-It borrows the spirit of **[ThePrimeagen](https://www.youtube.com/c/ThePrimeagen)**’s obsession with tooling and automation, combined with safety-first design.
+It borrows the spirit of my obsession with tooling and automation, combined with safety-first design.
 
 ---
 
