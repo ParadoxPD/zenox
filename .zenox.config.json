@@ -1,0 +1,68 @@
+{
+  "defaults": {
+    "gitignore": "yes",
+    "readme": "yes",
+    "licence": "MIT",
+    "base_dirs": ["~/Documents/Projects", "~/Documents", "~/Desktop"]
+  },
+  "templates": {
+    "node": {
+      "commands": ["npm init -y"],
+      "licence": "MIT"
+    },
+    "python": {
+      "commands": ["uv venv"]
+    },
+    "java": {
+      "commands": [
+        "mkdir -p src",
+        "echo 'public class Main { public static void main(String[] args) { System.out.println(\"Hello World\"); } }' > src/Main.java"
+      ]
+    },
+    "go": {
+      "commands": ["go mod init {{project_name}}", "touch .air.toml"],
+      "licence": "GPL-3.0",
+      "gitignore": "yes",
+      "readme": "no"
+    },
+    "zig": {
+      "commands": ["zig init-exe"]
+    },
+    "rust": {
+      "commands": ["cargo init"]
+    },
+    "assembly": {
+      "commands": ["touch main.asm", "echo '; Assembly entry point' > main.asm"]
+    },
+    "react": {
+      "commands": ["npm create vite@latest . -- --template react"]
+    },
+    "elixir": {
+      "commands": ["mix new {{project_name}}"]
+    },
+    "ocaml": {
+      "commands": [
+        "mkdir -p src",
+        "echo 'print_endline \"Hello, OCaml!\";;' > src/main.ml"
+      ]
+    },
+    "flutter": {
+      "commands": ["flutter create ."]
+    },
+    "php": {
+      "commands": ["laravel new ."]
+    },
+    "javascript": {
+      "commands": ["npm init -y", "touch index.js"]
+    },
+    "arduino": {
+      "commands": [
+        "mkdir -p {{project_name}}",
+        "echo '// Arduino sketch' > {{project_name}}/{{project_name}}.ino"
+      ]
+    },
+    "none": {
+      "commands": []
+    }
+  }
+}

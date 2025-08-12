@@ -1,6 +1,6 @@
 #!/bin/bash
 
-CONFIG_FILE="$XDG_CONFIG_HOME/zenox/.zenox.config.json"
+CONFIG_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/zenox/.zenox.config.json"
 
 # --------------------------- Colors --------------------------- #
 RED='\033[0;31m'
@@ -12,6 +12,8 @@ NC='\033[0m' # No Color
 
 # ------------------------ Global Vars ------------------------- #
 debug_flag=0
+interactive=0
+template=""
 dry_run=0
 old_stty=$(stty -g)
 
@@ -31,35 +33,43 @@ expand_path() {
 show_help() {
     echo -e "\n\n ${CYAN}Zenox - Interactive Project Initializer${NC}
     ${BLUE}---------------------------------------${NC}
-    A Bash utility for quickly setting up new projects with interactive prompts,
-    preconfigured templates, and optional tmux integration.
+    A Bash utility for quickly setting up new projects using a JSON-driven config,
+    with an interactive TUI for selecting base directory, project type, and license.
 
     ${YELLOW}USAGE:${NC}
       zenox [OPTIONS]
 
     ${YELLOW}OPTIONS:${NC}
-      ${GREEN}-h, --help${NC}       Show this help message and exit.
-      ${GREEN}-d, --debug${NC}      Enable debug mode (static banner, extra logs).
-      ${GREEN}-n, --dry-run${NC}    Show the commands that would run without executing them.
+      ${GREEN}-h, --help${NC}         Show this help message and exit.
+      ${GREEN}-d, --debug${NC}        Enable debug mode (static banner, extra logs).
+      ${GREEN}-n, --dry-run${NC}      Show commands that would run without executing them.
+      ${GREEN}-i, --interactive${NC}  Force interactive TUI mode (default if no other mode is specified).
 
     ${YELLOW}FEATURES:${NC}
-      • Interactive TUI selection for base directory, project type, and license.
-      • Language/framework templates:
-        ${GREEN}Node.js, Python (uv venv), Java, Go, Zig, Rust, Assembly,${NC}
-        ${GREEN}React (Vite), Elixir, OCaml, Flutter, PHP (Laravel),${NC}
-        ${GREEN}JavaScript, Arduino${NC}.
+      • Config-driven templates with per-language commands.
+      • TUI selection for base directory, project type, and license.
       • Automatic README.md, .gitignore, and LICENSE creation.
       • License templates fetched from GitHub API.
       • Optional tmux session creation.
-      • Configurable defaults via ~/.config/.projinitrc.
+      • Configurable defaults via ~/.config/zenox/config.json.
 
-    ${YELLOW}CONFIGURATION (~/.config/.projinitrc):${NC}
-      DEFAULT_PROJECT_PATH=\"/path/to/projects\"
-      DEFAULT_INIT_TYPE=\"Go\"
-      DEFAULT_LICENSE=\"MIT\"
+    ${YELLOW}CONFIGURATION (~/.config/zenox/config.json):${NC}
+      {
+        \"defaults\": {
+          \"gitignore\": \"yes\",
+          \"readme\": \"yes\",
+          \"licence\": \"MIT\",
+          \"base_dirs\": [\"~/Documents/Projects\", \"~/Documents\", \"~/Desktop\"]
+        },
+        \"templates\": {
+          \"node\": { \"commands\": [\"npm init -y\"], \"licence\": \"MIT\" },
+          \"go\": { \"commands\": [\"go mod init {{project_name}}\"], \"licence\": \"GPL-3.0\" }
+        }
+      }
 
     ${YELLOW}EXAMPLES:${NC}
       zenox                # Start interactive flow
+      zenox -i             # Force interactive flow
       zenox -n             # Dry-run mode
       zenox --debug        # Debug mode
 
@@ -78,9 +88,14 @@ parse_flags() {
             exit 0
             ;;
         -n | --dry-run) dry_run=1 ;;
+        -t | --template)
+            template="$2"
+            shift
+            ;;
+        -i | --interactive) interactive=1 ;;
         *)
             echo "Unknown option: $1"
-            echo "Usage: $0 [-d | --debug]"
+            echo "Usage: $0 [-d | --debug] [-t template] [-i]"
             exit 1
             ;;
         esac
@@ -124,126 +139,46 @@ EOF
 
 # ----------------------- Init Functions ------------------------ #
 
-init_node() {
-    if [[ "$dry_run" -eq 1 ]]; then
-        echo "[Dry Run] npm init -y"
-    else
-        npm init -y
-    fi
-}
+run_init() {
+    local type="$1"
+    local fn="init_${type,,}" # lowercase for function name
 
-init_python() {
-    if [[ "$dry_run" -eq 1 ]]; then
-        echo "[Dry Run] uv venv"
+    # 1) Run type initializer if available
+    if declare -f "$fn" >/dev/null; then
+        color_echo CYAN "Running initializer for type: $type"
+        "$fn"
     else
-        uv venv
+        if [[ "$dry_run" -eq 1 ]]; then
+            echo "[Dry Run] Would run initializer for type: $type (function $fn not found)"
+        else
+            color_echo YELLOW "No initializer found for type: $type"
+        fi
     fi
-}
 
-init_java() {
-    if [[ "$dry_run" -eq 1 ]]; then
-        echo "[Dry Run] mkdir -p src && echo ... > src/Main.java"
-    else
-        mkdir -p src
-        echo 'public class Main { public static void main(String[] args) { System.out.println("Hello World"); } }' >src/Main.java
+    # 2) Run template-specific commands (if template used)
+    if [[ -n "$template" ]]; then
+        local cmds
+        template_config=$(get_config_value "templates" "template")
+        cmds=$(jq -r '.commands[]?' <<<"$template_config")
+
+        if [[ -n "$cmds" ]]; then
+            color_echo CYAN "Applying template commands for: $template"
+            while IFS= read -r cmd; do
+                [[ -z "$cmd" ]] && continue
+
+                # Placeholder replacements
+                cmd="${cmd//\{\{project_name\}\}/$project_name}"
+                cmd="${cmd//\{\{project_dir\}\}/$project_dir}"
+                cmd="${cmd//\{\{base_path\}\}/$base_path}"
+
+                if [[ "$dry_run" -eq 1 ]]; then
+                    echo "[Dry Run] $cmd"
+                else
+                    bash -c "$cmd"
+                fi
+            done <<<"$cmds"
+        fi
     fi
-}
-
-init_go() {
-    if [[ "$dry_run" -eq 1 ]]; then
-        echo "[Dry Run] go mod init \"$project_name\""
-    else
-        go mod init "$project_name"
-        touch .air.toml
-    fi
-}
-
-init_zig() {
-    if [[ "$dry_run" -eq 1 ]]; then
-        echo "[Dry Run] zig init-exe"
-    else
-        zig init-exe
-    fi
-}
-
-init_rust() {
-    if [[ "$dry_run" -eq 1 ]]; then
-        echo "[Dry Run] cargo init"
-    else
-        cargo init
-    fi
-}
-
-init_assembly() {
-    if [[ "$dry_run" -eq 1 ]]; then
-        echo "[Dry Run] touch main.asm && echo ... > main.asm"
-    else
-        touch main.asm
-        echo "; Assembly entry point" >main.asm
-    fi
-}
-
-init_react() {
-    if [[ "$dry_run" -eq 1 ]]; then
-        echo "[Dry Run] npm create vite@latest . -- --template react"
-    else
-        npm create vite@latest . -- --template react
-    fi
-}
-
-init_elixir() {
-    if [[ "$dry_run" -eq 1 ]]; then
-        echo "[Dry Run] mix new \"$project_name\""
-    else
-        mix new "$project_name"
-    fi
-}
-
-init_ocaml() {
-    if [[ "$dry_run" -eq 1 ]]; then
-        echo "[Dry Run] mkdir -p src && echo ... > src/main.ml"
-    else
-        mkdir -p src
-        echo 'print_endline "Hello, OCaml!";;' >src/main.ml
-    fi
-}
-
-init_flutter() {
-    if [[ "$dry_run" -eq 1 ]]; then
-        echo "[Dry Run] flutter create ."
-    else
-        flutter create .
-    fi
-}
-
-init_php() {
-    if [[ "$dry_run" -eq 1 ]]; then
-        echo "[Dry Run] laravel new ."
-    else
-        laravel new .
-    fi
-}
-
-init_javascript() {
-    if [[ "$dry_run" -eq 1 ]]; then
-        echo "[Dry Run] npm init -y && touch index.js"
-    else
-        npm init -y
-        touch index.js
-    fi
-}
-
-init_arduino() {
-    if [[ "$dry_run" -eq 1 ]]; then
-        echo "[Dry Run] mkdir -p \"$project_name\" && echo ... > \"$project_name/$project_name.ino\""
-    else
-        mkdir -p "$project_name"
-        echo "// Arduino sketch" >"$project_name/$project_name.ino"
-    fi
-}
-
-init_none() {
-    echo "No Type : Empty project"
 }
 
 initialize_project() {
@@ -258,14 +193,7 @@ initialize_project() {
         git init
     fi
 
-    # Dynamic dispatch to language-specific init
-    local func="init_${type,,}" # lowercase function
-    if declare -f "$func" >/dev/null; then
-        color_echo CYAN "Running $func..."
-        "$func"
-    else
-        color_echo RED "No initializer found for $type."
-    fi
+    run_init "$type"
 
     [[ "$gi" =~ ^[Yy]$ ]] && create_gitignore "$type"
     if [[ "$readme" =~ ^[Yy]$ ]]; then
@@ -430,53 +358,160 @@ sessionize() {
     tmux_create "$session_name"
 }
 
+# ------------------------ Config Logic ------------------------ #
+
+load_config() {
+    if [[ -f "$CONFIG_FILE" ]]; then
+        CONFIG_JSON=$(cat "$CONFIG_FILE")
+    else
+        CONFIG_JSON='{}'
+    fi
+}
+
+get_config_value() {
+    local template_name="$1"
+    local key="$2"
+    jq -r --arg tmpl "$template_name" --arg key "$key" \
+        'if .templates[$tmpl][$key] != null then .templates[$tmpl][$key] else empty end' \
+        <<<"$CONFIG_JSON"
+}
+
+get_default_value() {
+    local key="$1"
+    jq -r --arg key "$key" \
+        'if .defaults[$key] != null then .defaults[$key] else empty end' \
+        <<<"$CONFIG_JSON"
+}
+
+get_value() {
+    local key="$1"
+    local prompt="$2"
+    local fallback="$3"
+    local template_val="" default_val=""
+
+    if [[ -n "$template" ]]; then
+        template_val=$(get_config_value "$template" "$key")
+    fi
+    default_val=$(get_default_value "$key")
+
+    if [[ -n "$template_val" ]]; then
+        echo "$template_val"
+    elif [[ "$interactive" -eq 1 ]]; then
+        # Interactive with hint from default
+        hint="${default_val:-$fallback}"
+        special_read "$prompt [default: $hint]" ans "$hint"
+        echo "$ans"
+    elif [[ -n "$default_val" ]]; then
+        echo "$default_val"
+    else
+        # Fallback to user prompt
+        special_read "$prompt" ans "$fallback"
+        echo "$ans"
+    fi
+}
+
+# --------------------- Main Function ----------------------- #
+
+main() {
+    # Load config
+    load_config
+
+    # Get base_dirs from config or fallback list
+    if
+        base_dirs_json=$(get_config_value "defaults" "base_dirs")
+        [[ -n "$base_dirs_json" ]]
+    then
+        # Parse array into space-separated list
+        mapfile -t base_dirs < <(jq -r '.[]' <<<"$base_dirs_json")
+    else
+        base_dirs=(~/Documents ~/Desktop)
+    fi
+
+    # Expand and run fd across all base_dirs
+    expanded_dirs=()
+    for dir in "${base_dirs[@]}"; do
+        expanded_dirs+=("$(expand_path "$dir")")
+    done
+
+    base_path=$(fd . "${expanded_dirs[@]}" --type=d --hidden --exclude .git --min-depth 0 --max-depth 3 |
+        uniq | sort |
+        fzf --height=20 --border --reverse --ansi)
+
+    [[ -z "$base_path" ]] && exit_process "No base path selected."
+    base_path=$(expand_path "$base_path")
+    color_echo GREEN "Base Directory: $base_path"
+
+    # Project name
+    project_name=""
+    special_read "${YELLOW}Enter the project name:${NC}" project_name ""
+    [[ -z "$project_name" ]] && exit_process "Project name cannot be empty."
+    project_dir="$base_path/$project_name"
+    [[ -d "$project_dir" ]] && exit_process "Project already exists." "$project_dir"
+
+    if [[ "$dry_run" -eq 1 ]]; then
+        color_echo YELLOW "[Dry Run] Creating Directory"
+    else
+        mkdir -p "$project_dir" || exit_process "Failed to create project directory."
+        cd "$project_dir" || exit_process "cd failed." "$project_dir"
+    fi
+
+    # Project type
+    if [[ -n "$template" ]]; then
+        selected_type=$(jq -r --arg t "$template" '.templates[$t].type // empty' <<<"$CONFIG_JSON")
+    fi
+
+    if [[ -z "$selected_type" ]]; then
+        selected_type=$(jq -r '.defaults.type // empty' <<<"$CONFIG_JSON")
+    fi
+
+    if [[ -z "$selected_type" ]]; then
+        types=($(jq -r '.templates | keys[]' <<<"$CONFIG_JSON"))
+        selected_type=$(printf "%s\n" "${types[@]}" |
+            fzf --prompt="Select project type: " --height=15 --border --reverse --ansi)
+    fi
+
+    [[ -z "$selected_type" ]] && exit_process "No project type selected." "$project_dir"
+
+    # README + Gitignore
+    readme_choice=$(get_value "readme" "${YELLOW}Create README.md? (Y/N):${NC}" "N")
+    gitignore_choice=$(get_value "gitignore" "${YELLOW}Create .gitignore? (Y/N):${NC}" "N")
+
+    initialize_project "$selected_type" "$gitignore_choice" "$readme_choice"
+
+    # License
+    if [[ -n "$template" ]]; then
+        selected_licence=$(get_config_value "templates" "$template.licence")
+    fi
+
+    if [[ -z "$selected_licence" ]]; then
+        selected_licence=$(get_default_value "licence")
+    fi
+
+    if [[ -z "$selected_licence" ]]; then
+        licences=("MIT" "Apache-2.0" "GPL-3.0" "BSD-2-Clause" "BSD-3-Clause"
+            "LGPL-3.0" "AGPL-3.0" "MPL-2.0" "Unlicense" "CC0-1.0" "EPL-2.0" "None")
+        selected_licence=$(printf "%s\n" "${licences[@]}" |
+            fzf --prompt="Select license: " --height=10 --border --reverse --ansi)
+    fi
+
+    [[ -z "$selected_licence" ]] && exit_process "No license selected."
+    set_licence "$selected_licence"
+
+    color_echo GREEN "Project setup complete at ${project_dir}."
+    [[ "$dry_run" -eq 1 ]] && color_echo YELLOW "(Dry run mode: no files were written.)"
+
+    # Tmux session
+    session_choice=$(get_value "tmux_session" "${YELLOW}Create tmux session? (Y/N):${NC}" "Y")
+    if [[ "$dry_run" -eq 1 ]]; then
+        color_echo YELLOW "[Dry Run] No Session Was Created"
+    else
+        [[ "$session_choice" =~ ^[Nn]$ ]] || sessionize "$project_dir"
+    fi
+
+}
+
 # --------------------- Script Execution ----------------------- #
+
 parse_flags "$@"
 animate
-
-base_path=$(fd . ~/ ~/Documents ~/Desktop ~/Documents/Projects --type=d --hidden --exclude .git --min-depth 0 --max-depth 3 | uniq | sort | fzf --height=20 --border --reverse --ansi)
-[[ -z "$base_path" ]] && exit_process "No base path selected."
-
-base_path=$(expand_path "$base_path")
-base_path="${base_path:-$DEFAULT_PROJECT_PATH}"
-color_echo GREEN "Base Directory: $base_path"
-
-special_read "${YELLOW}Enter the project name:${NC}" project_name ""
-[[ -z "$project_name" ]] && exit_process "Project name cannot be empty."
-
-project_dir="$base_path/$project_name"
-[[ -d "$project_dir" ]] && exit_process "Project already exists." "$project_dir"
-
-if [[ "$dry_run" -eq 1 ]]; then
-    color_echo YELLOW "[Dry Run] Creating Directory"
-else
-    mkdir -p "$project_dir" || exit_process "Failed to create project directory."
-    cd "$project_dir" || exit_process "cd failed." "$project_dir"
-fi
-
-# Select project type
-types=(Node Python Java Go Zig Rust Assembly React Elixir OCaml Flutter PHP JavaScript Arduino None)
-selected_type=$(printf "%s\n" "${types[@]}" | fzf --prompt="Select project type: " --height=15 --border --reverse --ansi)
-selected_type="${selected_type:-$DEFAULT_INIT_TYPE}"
-[[ -z "$selected_type" ]] && exit_process "No project type selected." "$project_dir"
-
-special_read "${YELLOW}Create README.md? (Y/N):${NC}" readme_choice "N"
-special_read "${YELLOW}Create .gitignore? (Y/N):${NC}" gitignore_choice "N"
-
-initialize_project "$selected_type" "$gitignore_choice" "$readme_choice"
-
-# Select license
-licences=("MIT" "Apache-2.0" "GPL-3.0" "BSD-2-Clause" "BSD-3-Clause" "LGPL-3.0" "AGPL-3.0" "MPL-2.0" "Unlicense" "CC0-1.0" "EPL-2.0" "None")
-selected_licence=$(printf "%s\n" "${licences[@]}" | fzf --prompt="Select license: " --height=10 --border --reverse --ansi)
-selected_licence="${selected_licence:-$DEFAULT_LICENSE}"
-set_licence "$selected_licence"
-
-color_echo GREEN "Project setup complete at ${project_dir}."
-[[ "$dry_run" -eq 1 ]] && color_echo YELLOW "(Dry run mode: no files were written.)"
-
-special_read "${YELLOW}Create tmux session? (Y/N):${NC}" session_choice "Y"
-if [[ "$dry_run" -eq 1 ]]; then
-    color_echo YELLOW "[Dry Run] No Session Was Created"
-else
-    [[ "$session_choice" =~ ^[Nn]$ ]] || sessionize "$project_dir"
-fi
+main

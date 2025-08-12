@@ -37,15 +37,17 @@ It provides a guided, TUI-driven setup process that handles directory creation, 
 - **Automatic `.gitignore` generation** for supported languages.
 - **License auto-fetching** from GitHub’s license API:
   - Supports MIT, Apache-2.0, GPL-3.0, BSD variants, LGPL, AGPL, MPL, CC0, Unlicense, EPL-2.0, etc.
-- **Configurable defaults** via `~/.config/.projinitrc`:
+- **Configurable defaults** via `~/.config/zenox/config.json`:
   - Default project type
   - Default license
   - Default base path
+- **Modes**:
+  - **Interactive mode** (`-i` / `--interactive`) – TUI-driven setup (default if no mode is specified).
+  - **Dry-run mode** (`-n` / `--dry-run`) – Preview commands without executing them.
+  - **Debug mode** (`-d` / `--debug`) – Show static ASCII banner and extra logs.
 - **Safety checks**:
   - Prevents accidental overwriting of existing projects.
   - Protects against dangerous deletions in home/documents directories.
-- **Dry-run mode** (`-n` / `--dry-run`) to preview all commands without executing them.
-- **Debug mode** (`-d` / `--debug`) with static ASCII banner.
 - **Animated ASCII banner** for normal mode.
 - **Custom colorized output** for better readability.
 - **ESC key detection** to gracefully abort the process at any prompt.
@@ -59,7 +61,7 @@ It provides a guided, TUI-driven setup process that handles directory creation, 
 Clone the repo and make the script executable:
 
 ```bash
-git clone https://github.com/yourusername/zenox.git
+git clone https://github.com/ParadoxPD/zenox.git
 cd zenox
 chmod +x zenox
 ```
@@ -80,29 +82,46 @@ sudo mv zenox /usr/local/bin/zenox
 zenox
 ```
 
-Starts the interactive project initialization flow.
+Starts the **interactive** project initialization flow (default mode).
 
 ### Flags
 
 ```bash
 zenox [options]
-
-Options:
-  -d, --debug     Enable debug mode (static banner, extra logs)
-  -n, --dry-run   Show actions without making changes
-  -h, --help      Show usage info
 ```
+
+| Option              | Description                                                         |
+| ------------------- | ------------------------------------------------------------------- |
+| `-i, --interactive` | Run in interactive TUI mode (default if no other mode is specified) |
+| `-n, --dry-run`     | Show actions without making changes                                 |
+| `-d, --debug`       | Enable debug mode (static banner, extra logs)                       |
+| `-h, --help`        | Show help message and exit                                          |
 
 ---
 
 ## 🛠 Configuration
 
-You can create a `$XDG_CONFIG_HOME/.config/.zenox.config.json` file to define defaults:
+You can create a `$XDG_CONFIG_HOME/zenox/config.json` file to define defaults:
 
-```bash
-DEFAULT_PROJECT_PATH="$HOME/Documents/Projects"
-DEFAULT_INIT_TYPE="Go"
-DEFAULT_LICENSE="MIT"
+```json
+{
+  "defaults": {
+    "gitignore": "yes",
+    "readme": "yes",
+    "licence": "MIT",
+    "base_dirs": ["~/Documents/Projects", "~/Documents", "~/Desktop"]
+  },
+  "templates": {
+    "node": {
+      "commands": ["npm init -y"],
+      "licence": "MIT"
+    },
+    "go": {
+      "commands": ["go mod init {{project_name}}"],
+      "licence": "GPL-3.0"
+    }
+  }
+}
 ```
 
 ---
