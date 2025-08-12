@@ -93,6 +93,7 @@ zenox [options]
 | Option              | Description                                                         |
 | ------------------- | ------------------------------------------------------------------- |
 | `-i, --interactive` | Run in interactive TUI mode (default if no other mode is specified) |
+| `-t, --template`    | Select from predefined templates                                    |
 | `-n, --dry-run`     | Show actions without making changes                                 |
 | `-d, --debug`       | Enable debug mode (static banner, extra logs)                       |
 | `-h, --help`        | Show help message and exit                                          |
@@ -131,7 +132,10 @@ You can create a `$XDG_CONFIG_HOME/zenox/config.json` file to define defaults:
 **Run:**
 
 ```bash
-zenox
+      zenox -i             # Force interactive flow
+      zenox -t template    # Select predefined template
+      zenox -n             # Dry-run mode
+      zenox --debug        # Debug mode
 ```
 
 **Steps:**

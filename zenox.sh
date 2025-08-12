@@ -95,7 +95,7 @@ parse_flags() {
         -i | --interactive) interactive=1 ;;
         *)
             echo "Unknown option: $1"
-            echo "Usage: $0 [-d | --debug] [-t template] [-i]"
+            show_help
             exit 1
             ;;
         esac
