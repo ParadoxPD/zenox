@@ -1,9 +1,9 @@
 {
   "defaults": {
-    "gitignore": "yes",
-    "readme": "yes",
+    "gitignore": "Y",
+    "readme": "Y",
     "licence": "MIT",
-    "base_dirs": ["~/Documents/Projects", "~/Documents", "~/Desktop"]
+    "base_dirs": ["~/Documents/Projects", "~/Documents", "~/Desktop", "~/"]
   },
   "templates": {
     "node": {
@@ -22,8 +22,8 @@
     "go": {
       "commands": ["go mod init {{project_name}}", "touch .air.toml"],
       "licence": "GPL-3.0",
-      "gitignore": "yes",
-      "readme": "no"
+      "gitignore": "Y",
+      "readme": "N"
     },
     "zig": {
       "commands": ["zig init-exe"]

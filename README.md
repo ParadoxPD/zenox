@@ -106,8 +106,8 @@ You can create a `$XDG_CONFIG_HOME/zenox/config.json` file to define defaults:
 ```json
 {
   "defaults": {
-    "gitignore": "yes",
-    "readme": "yes",
+    "gitignore": "Y",
+    "readme": "Y",
     "licence": "MIT",
     "base_dirs": ["~/Documents/Projects", "~/Documents", "~/Desktop"]
   },

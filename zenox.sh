@@ -56,8 +56,8 @@ show_help() {
     ${YELLOW}CONFIGURATION (~/.config/zenox/config.json):${NC}
       {
         \"defaults\": {
-          \"gitignore\": \"yes\",
-          \"readme\": \"yes\",
+          \"gitignore\": \"Y\",
+          \"readme\": \"Y\",
           \"licence\": \"MIT\",
           \"base_dirs\": [\"~/Documents/Projects\", \"~/Documents\", \"~/Desktop\"]
         },
@@ -101,6 +101,12 @@ parse_flags() {
         esac
         shift
     done
+
+    # Require at least interactive mode, a template, or both
+    if [[ "${interactive:-0}" -ne 1 && -z "$template" ]]; then
+        color_echo "RED" "\n\nError: You must specify either --interactive (-i) or --template (-t), or both.\n\n"
+        exit 1
+    fi
 }
 
 # ------------------ ASCII Banner ----------------------------- #
@@ -141,25 +147,12 @@ EOF
 
 run_init() {
     local type="$1"
-    local fn="init_${type,,}" # lowercase for function name
-
-    # 1) Run type initializer if available
-    if declare -f "$fn" >/dev/null; then
-        color_echo CYAN "Running initializer for type: $type"
-        "$fn"
-    else
-        if [[ "$dry_run" -eq 1 ]]; then
-            echo "[Dry Run] Would run initializer for type: $type (function $fn not found)"
-        else
-            color_echo YELLOW "No initializer found for type: $type"
-        fi
-    fi
 
     # 2) Run template-specific commands (if template used)
     if [[ -n "$template" ]]; then
         local cmds
-        template_config=$(get_config_value "templates" "template")
-        cmds=$(jq -r '.commands[]?' <<<"$template_config")
+        template_config=$(get_config_value "$template" "commands")
+        cmds=$(jq -r '.[]?' <<<"$template_config")
 
         if [[ -n "$cmds" ]]; then
             color_echo CYAN "Applying template commands for: $template"
@@ -293,49 +286,46 @@ special_read() {
     local prompt="$1"
     local __varname="$2"
     local default_value="${3:-}"
-    local exit_on_esc="${4:-true}" # Fourth parameter: true=exit script, false=just return
+    local exit_on_esc="${4:-true}" # true = exit script, false = just return
 
     # Show prompt
-    echo -e "$prompt   "
+    echo -ne "$prompt   " >/dev/tty
 
     # Save terminal settings
     local old_stty
-    old_stty=$(stty -g)
-    # Set terminal to capture escape sequences
-    stty raw -echo
+    old_stty=$(stty -g </dev/tty)
+    stty raw -echo </dev/tty
 
     # Read a single character to check for ESC
     local char
-    IFS= read -r -n1 char
+    IFS= read -r -n1 char </dev/tty
 
     # Check if ESC was pressed
     if [[ "$char" == $'\e' ]]; then
-        # Reset terminal
-        stty "$old_stty"
-        echo
+        stty "$old_stty" </dev/tty
+        echo >/dev/tty
 
         if [[ "$exit_on_esc" == "true" ]]; then
-            exit_process "Escape pressed. Exiting gracefully." $project_dir
+            exit_process "Escape pressed. Exiting gracefully." "$project_dir"
         else
             printf -v "$__varname" ""
-            return 1 # Just return from function
+            return 1
         fi
     else
-        # Rest of the function remains the same...
-        stty "$old_stty"
+        # Restore settings before reading full input
+        stty "$old_stty" </dev/tty
 
         local input
         if [[ -n "$char" && "$char" != $'\r' && "$char" != $'\n' ]]; then
             input="$char"
-            read -e -i "$input" input
+            read -e -i "$input" input </dev/tty
             printf -v "$__varname" "%s" "$input"
             return 0
         else
             printf -v "$__varname" "%s" "$default_value"
-            echo
+            echo >/dev/tty
             return 0
         fi
-
     fi
 }
 
@@ -387,7 +377,8 @@ get_value() {
     local key="$1"
     local prompt="$2"
     local fallback="$3"
-    local template_val="" default_val=""
+    local template_val=""
+    local default_val=""
 
     if [[ -n "$template" ]]; then
         template_val=$(get_config_value "$template" "$key")
@@ -395,16 +386,18 @@ get_value() {
     default_val=$(get_default_value "$key")
 
     if [[ "$interactive" -eq 1 ]]; then
-        # Interactive with hint from default
-        hint="${template:-${default_val:-$fallback}}"
+        # TUI or full interactive mode
+        hint="${template_val:-${default_val:-$fallback}}"
         special_read "$prompt [default: $hint]" ans "$hint"
         echo "$ans"
     elif [[ -n "$template_val" ]]; then
+        # Use template config value if available
         echo "$template_val"
     elif [[ -n "$default_val" ]]; then
+        # Use global default config if available
         echo "$default_val"
     else
-        # Fallback to user prompt
+        # Fallback: still prompt user (simple prompt, no fzf)
         special_read "$prompt" ans "$fallback"
         echo "$ans"
     fi
@@ -418,7 +411,7 @@ main() {
 
     # Get base_dirs from config or fallback list
     if
-        base_dirs_json=$(get_config_value "defaults" "base_dirs")
+        base_dirs_json=$(get_default_value "base_dirs")
         [[ -n "$base_dirs_json" ]]
     then
         # Parse array into space-separated list
@@ -480,7 +473,7 @@ main() {
 
     # License
     if [[ -n "$template" ]]; then
-        selected_licence=$(get_config_value "templates" "$template.licence")
+        selected_licence=$(get_config_value "$template" "licence")
     fi
 
     if [[ -z "$selected_licence" ]]; then
@@ -501,7 +494,9 @@ main() {
     [[ "$dry_run" -eq 1 ]] && color_echo YELLOW "(Dry run mode: no files were written.)"
 
     # Tmux session
-    session_choice=$(get_value "tmux_session" "${YELLOW}Create tmux session? (Y/N):${NC}" "Y")
+    echo "Hello "
+    session_choice=$(get_value "tmux_session" "${YELLOW}Create tmux session? (Y/N):${NC}" "N")
+    echo "Test"
     if [[ "$dry_run" -eq 1 ]]; then
         color_echo YELLOW "[Dry Run] No Session Was Created"
     else
