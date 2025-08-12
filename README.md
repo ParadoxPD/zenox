@@ -202,7 +202,3 @@ It borrows the spirit of my obsession with tooling and automation, combined with
 ## 📜 License
 
 [MIT](https://github.com/ParadoxPD/zenox/blob/main/LICENSE)
-
-```
-
-```
