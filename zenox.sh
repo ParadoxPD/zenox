@@ -494,9 +494,7 @@ main() {
     [[ "$dry_run" -eq 1 ]] && color_echo YELLOW "(Dry run mode: no files were written.)"
 
     # Tmux session
-    echo "Hello "
     session_choice=$(get_value "tmux_session" "${YELLOW}Create tmux session? (Y/N):${NC}" "N")
-    echo "Test"
     if [[ "$dry_run" -eq 1 ]]; then
         color_echo YELLOW "[Dry Run] No Session Was Created"
     else
