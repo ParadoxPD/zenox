@@ -394,13 +394,13 @@ get_value() {
     fi
     default_val=$(get_default_value "$key")
 
-    if [[ -n "$template_val" ]]; then
-        echo "$template_val"
-    elif [[ "$interactive" -eq 1 ]]; then
+    if [[ "$interactive" -eq 1 ]]; then
         # Interactive with hint from default
-        hint="${default_val:-$fallback}"
+        hint="${template:-${default_val:-$fallback}}"
         special_read "$prompt [default: $hint]" ans "$hint"
         echo "$ans"
+    elif [[ -n "$template_val" ]]; then
+        echo "$template_val"
     elif [[ -n "$default_val" ]]; then
         echo "$default_val"
     else
