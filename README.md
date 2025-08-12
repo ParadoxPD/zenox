@@ -37,7 +37,7 @@ It provides a guided, TUI-driven setup process that handles directory creation, 
 - **Automatic `.gitignore` generation** for supported languages.
 - **License auto-fetching** from GitHub’s license API:
   - Supports MIT, Apache-2.0, GPL-3.0, BSD variants, LGPL, AGPL, MPL, CC0, Unlicense, EPL-2.0, etc.
-- **Configurable defaults** via `~/.config/zenox/config.json`:
+- **Configurable defaults** via `~/.config/zenox/.zenox.config.json`:
   - Default project type
   - Default license
   - Default base path
@@ -201,7 +201,7 @@ It borrows the spirit of my obsession with tooling and automation, combined with
 
 ## 📜 License
 
-[MIT](LICENSE)
+[MIT](https://github.com/ParadoxPD/zenox/blob/main/LICENSE)
 
 ```
 
