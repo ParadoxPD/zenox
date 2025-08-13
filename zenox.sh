@@ -40,10 +40,11 @@ show_help() {
       zenox [OPTIONS]
 
     ${YELLOW}OPTIONS:${NC}
-      ${GREEN}-h, --help${NC}         Show this help message and exit.
-      ${GREEN}-d, --debug${NC}        Enable debug mode (static banner, extra logs).
-      ${GREEN}-n, --dry-run${NC}      Show commands that would run without executing them.
-      ${GREEN}-i, --interactive${NC}  Force interactive TUI mode (default if no other mode is specified).
+      ${GREEN}-h, --help${NC}                   Show this help message and exit.
+      ${GREEN}-d, --debug${NC}                  Enable debug mode (static banner, extra logs).
+      ${GREEN}-n, --dry-run${NC}                Show commands that would run without executing them.
+      ${GREEN}-t, --template [Template]${NC}    Define Templates to use.
+      ${GREEN}-i, --interactive${NC}            Force interactive TUI mode (default if no other mode is specified).
 
     ${YELLOW}FEATURES:${NC}
       • Config-driven templates with per-language commands.
@@ -68,8 +69,8 @@ show_help() {
       }
 
     ${YELLOW}EXAMPLES:${NC}
-      zenox                # Start interactive flow
-      zenox -i             # Force interactive flow
+      zenox -i             # Interactive flow
+      zenox -t [Template]  # Add Template
       zenox -n             # Dry-run mode
       zenox --debug        # Debug mode
 
@@ -205,15 +206,19 @@ create_gitignore() {
     if [[ "$dry_run" -eq 1 ]]; then
         echo "[Dry Run] Creating .gitignore for $type"
     else
-        case "$type" in
-        node) echo -e "node_modules/\n.env" >.gitignore ;;
-        python) echo -e "__pycache__/\n.env\n.venv/" >.gitignore ;;
-        java) echo -e "bin/\n*.class" >.gitignore ;;
-        *) touch .gitignore ;;
-        esac
+        # Get template from config
+        local template
+        template=$(jq -r --arg t "$type" '.templates[$t].gitignore // empty' "$CONFIG_FILE")
+
+        if [[ -n "$template" && "$template" != "null" ]]; then
+            echo -e "$template" >.gitignore
+        else
+            # Generic default if config doesn't have template
+            echo -e "# Generic .gitignore\n*.log\n*.tmp\n.DS_Store\n.env*" >.gitignore
+        fi
+
         color_echo GREEN "Created .gitignore"
     fi
-
 }
 
 # -------------------- License Logic --------------------------- #
@@ -235,20 +240,44 @@ set_licence() {
 
     local api_id="${licence_api_ids[$selected_licence]}"
     [[ -z "$api_id" ]] && {
-        color_echo RED "No API mapping found."
+        color_echo RED "No API mapping found for '$selected_licence'."
         return
     }
 
-    license_text=$(curl -s "https://api.github.com/licenses/$api_id" | jq -r '.body')
-    if [[ "$dry_run" -eq 1 ]]; then
-        echo "[Dry Run] Would fetch and write license: $selected_licence"
-    elif [[ -n "$license_text" && "$license_text" != "null" ]]; then
-        echo "$license_text" >LICENSE
-        color_echo GREEN "LICENSE file created using $selected_licence."
+    # Cache directory
+    local cache_dir="${HOME}/.license_cache"
+    mkdir -p "$cache_dir"
+    local cache_file="$cache_dir/${api_id}.txt"
+
+    # Check cache first
+    if [[ -f "$cache_file" ]]; then
+        license_text=$(<"$cache_file")
+        color_echo CYAN "Loaded $selected_licence license from cache."
     else
-        color_echo RED "Failed to fetch license text."
+        if [[ "$dry_run" -eq 1 ]]; then
+            echo "[Dry Run] Would fetch license: $selected_licence from GitHub API"
+            return
+        fi
+
+        color_echo CYAN "Fetching $selected_licence license from GitHub API..."
+        license_text=$(curl -s "https://api.github.com/licenses/$api_id" | jq -r '.body')
+
+        if [[ -n "$license_text" && "$license_text" != "null" ]]; then
+            echo "$license_text" >"$cache_file"
+            color_echo GREEN "Cached $selected_licence license to $cache_file"
+        else
+            color_echo RED "Failed to fetch license text for '$selected_licence'."
+            return
+        fi
     fi
 
+    # Write LICENSE file
+    if [[ "$dry_run" -eq 1 ]]; then
+        echo "[Dry Run] Would write LICENSE file for $selected_licence"
+    else
+        echo "$license_text" >LICENSE
+        color_echo GREEN "LICENSE file created using $selected_licence."
+    fi
 }
 
 # -------------------- Error Exit Logic ------------------------ #
@@ -449,12 +478,13 @@ main() {
     fi
 
     # Project type
-    if [[ -n "$template" ]]; then
-        selected_type=$(jq -r --arg t "$template" '.templates[$t].type // empty' <<<"$CONFIG_JSON")
+    if [[ -n "$template" && -n "$(jq -r --arg t "$template" '.templates[$t] // empty' <<<"$CONFIG_JSON")" ]]; then
+        # Template exists — use its key name as the type
+        selected_type="$template"
     fi
 
     if [[ -z "$selected_type" ]]; then
-        selected_type=$(jq -r '.defaults.type // empty' <<<"$CONFIG_JSON")
+        selected_type=$(jq -r '.defaults.template // empty' <<<"$CONFIG_JSON")
     fi
 
     if [[ -z "$selected_type" ]]; then
