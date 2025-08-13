@@ -180,12 +180,7 @@ initialize_project() {
     local gi="$2"
     local readme="$3"
 
-    color_echo CYAN "Initializing empty git repository..."
-    if [[ "$dry_run" -eq 1 ]]; then
-        echo "[Dry Run] git init"
-    else
-        git init
-    fi
+    init_git_repo
 
     run_init "$type"
 
@@ -199,6 +194,35 @@ initialize_project() {
         fi
     fi
 
+}
+
+init_git_repo() {
+    color_echo CYAN "Initializing empty git repository..."
+
+    if [[ "$dry_run" -eq 1 ]]; then
+        echo "[Dry Run] git init"
+    else
+        git init
+    fi
+
+    add_remote=$(get_value "git_remote" "${YELLOW}Do you want to add a remote repository? (Y/N):${NC}" "N")
+    if [[ "$add_remote" =~ ^[Yy]$ ]]; then
+        remote_name=$(get_value "git_remote_name" "${YELLOW}Enter remote name: ${NC}" "origin")
+        remote_name=${remote_name:-origin}
+
+        remote_uri=$(get_value "git_remote_uri" "${YELLOW}Enter remote URI: ${NC}" "")
+        if [[ -z "$remote_uri" ]]; then
+            color_echo RED "Remote URI cannot be empty. Skipping remote setup."
+            return
+        fi
+
+        if [[ "$dry_run" -eq 1 ]]; then
+            echo "[Dry Run] git remote add \"$remote_name\" \"$remote_uri\""
+        else
+            git remote add "$remote_name" "$remote_uri"
+            color_echo GREEN "Remote '$remote_name' added successfully."
+        fi
+    fi
 }
 
 create_gitignore() {
