@@ -479,9 +479,7 @@ main() {
         expanded_dirs+=("$(expand_path "$dir")")
     done
 
-    base_path=$(fd . "${expanded_dirs[@]}" --type=d --hidden --exclude .git --min-depth 0 --max-depth 3 |
-        uniq | sort |
-        fzf --height=20 --border --reverse --ansi)
+    base_path=$(fd . "${expanded_dirs[@]}" --type=d --hidden --exclude .git --min-depth 0 --max-depth 3 | sort -u | fzf --height=20 --border --reverse --ansi)
 
     [[ -z "$base_path" ]] && exit_process "No base path selected."
     base_path=$(expand_path "$base_path")
