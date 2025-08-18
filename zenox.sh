@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 CONFIG_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/zenox/.zenox.config.json"
 
@@ -75,7 +75,7 @@ show_help() {
       zenox --debug        # Debug mode
 
     ${YELLOW}DEPENDENCIES:${NC}
-      fzf, fd, realpath, jq, plus language-specific tools (npm, cargo, go, etc.)"
+      zsh, fzf, fd, realpath, jq, tmux, tmux-sessionizer plus language-specific tools (npm, cargo, go, etc.)"
 }
 
 # --------------------- Flag Parser ---------------------------- #
@@ -324,7 +324,7 @@ function exit_process() {
         cd ..
         echo "Deleting project directory : $2"
         #SCARY!!!!!
-        rm -r $2
+        rm -r "$2"
     fi
     echo -e "$1"
     echo -e "${NC}"
@@ -383,22 +383,17 @@ special_read() {
 }
 
 # ---------------------- Tmux Logic ---------------------------- #
-tmux_create() {
-    local session="$1"
-    if tmux has-session -t "$session" 2>/dev/null; then
-        [[ -n "$TMUX" ]] && tmux switch-client -t "$session" || tmux attach-session -t "$session"
-    else
-        tmux new-session -A -ds "$session"
-        tmux new-window -dt "$session":
-        tmux new-window -dt "$session":
-        [[ -n "$TMUX" ]] && tmux switch-client -t "$session" || tmux attach-session -t "$session"
-    fi
-}
 
 sessionize() {
-    local session_name=$(basename "$1")
+    local session_name
+    session_name=$(basename "$1")
     session_name="${session_name//./_}"
-    tmux_create "$session_name"
+    if command -v zsh >/dev/null 2>&1; then
+        zsh -i -c "source ~/.zshrc; tn \"$session_name\" -t \"$2\""
+    else
+        echo "install zsh and tmux-sessionizer"
+    fi
+
 }
 
 # ------------------------ Config Logic ------------------------ #
@@ -432,6 +427,7 @@ get_value() {
     local fallback="$3"
     local template_val=""
     local default_val=""
+    local ans=""
 
     if [[ -n "$template" ]]; then
         template_val=$(get_config_value "$template" "$key")
@@ -510,7 +506,8 @@ main() {
     fi
 
     if [[ -z "$selected_type" ]]; then
-        types=($(jq -r '.templates | keys[]' <<<"$CONFIG_JSON"))
+
+        mapfile -t types < <(jq -r '.templates | keys[]' <<<"$CONFIG_JSON")
         selected_type=$(printf "%s\n" "${types[@]}" |
             fzf --prompt="Select project type: " --height=15 --border --reverse --ansi)
     fi
@@ -550,7 +547,7 @@ main() {
     if [[ "$dry_run" -eq 1 ]]; then
         color_echo YELLOW "[Dry Run] No Session Was Created"
     else
-        [[ "$session_choice" =~ ^[Nn]$ ]] || sessionize "$project_dir"
+        [[ "$session_choice" =~ ^[Nn]$ ]] || sessionize "$project_dir" "$selected_type"
     fi
 
 }

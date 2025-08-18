@@ -182,6 +182,7 @@ myapp/
 
 ## 🖥 Dependencies
 
+- zsh, [`tmux`](https://github.com/tmux/tmux) and [`tmux-sessionizer`](https://github.com/ParadoxPD/tmux-sessionizer) - interactive tmux sessionizing
 - [`fzf`](https://github.com/junegunn/fzf) – interactive selection
 - [`fd`](https://github.com/sharkdp/fd) – fast file finder
 - `realpath` – path resolution
