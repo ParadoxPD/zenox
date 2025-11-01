@@ -2,13 +2,19 @@
 
 CONFIG_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/zenox/.zenox.config.json"
 
-# --------------------------- Colors --------------------------- #
+# --------------------------- ANSI CODES --------------------------- #
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 NC='\033[0m' # No Color
+
+# ANSI helpers
+CLEAR_LINE=$'\e[2K'
+MOVE_LEFT=$'\e[D'
+MOVE_RIGHT=$'\e[C'
+CLEAR=$'\033[2J\033[H' # clear screen & move cursor home
 
 # ------------------------ Global Vars ------------------------- #
 debug_flag=0
@@ -147,7 +153,7 @@ EOF
 # ----------------------- Init Functions ------------------------ #
 
 run_init() {
-    local type="$1"
+    local template="$1"
 
     # 2) Run template-specific commands (if template used)
     if [[ -n "$template" ]]; then
@@ -161,14 +167,17 @@ run_init() {
                 [[ -z "$cmd" ]] && continue
 
                 # Placeholder replacements
+                local project_name_lower="${project_name,,}"
                 cmd="${cmd//\{\{project_name\}\}/$project_name}"
+                cmd="${cmd//\{\{project_name_lower\}\}/$project_name_lower}"
                 cmd="${cmd//\{\{project_dir\}\}/$project_dir}"
                 cmd="${cmd//\{\{base_path\}\}/$base_path}"
 
                 if [[ "$dry_run" -eq 1 ]]; then
-                    echo "[Dry Run] $cmd"
+                    echo "[Dry Run] Command: $cmd"
                 else
-                    bash -c "$cmd"
+                    echo "$cmd"
+                    eval "$cmd"
                 fi
             done <<<"$cmds"
         fi
@@ -317,69 +326,193 @@ is_safe_relative_path() {
     return 0
 }
 
-function exit_process() {
-    echo
-    echo -e "${RED}"
-    if [[ "$#" -eq 2 && -d "$2" ]] && is_safe_relative_path "$2"; then
-        cd ..
-        echo "Deleting project directory : $2"
-        #SCARY!!!!!
-        rm -r "$2"
+exit_process() {
+    local message="$1"
+    if [[ -z "$message" ]]; then
+        message="Did you press Ctrl+C??????"
     fi
-    echo -e "$1"
-    echo -e "${NC}"
-    stty "$old_stty"
-    exit 1
 
+    local project_dir="$2"
+
+    # Clear screen
+    printf "%b" "$CLEAR"
+
+    # Restore terminal (if raw mode was active)
+    if [[ -n "$old_stty" ]]; then
+        stty "$old_stty" 2>/dev/null || true
+    fi
+    # Top border
+    printf "%b" "${RED}════════════════════════════════════════════════════════════════════════${NC}\n"
+    printf "%b" "${RED}EXITING PROCESS${NC}\n"
+    printf "%b" "${RED}════════════════════════════════════════════════════════════════════════${NC}\n\n"
+
+    # Delete project dir (if safe)
+    if [[ "$#" -eq 2 && -d "$project_dir" ]] && is_safe_relative_path "$project_dir"; then
+        cd ..
+        printf "%b" "${YELLOW}Deleting project directory: ${CYAN}${project_dir}${NC}\n"
+        rm -rf "$project_dir"
+        echo
+    fi
+
+    # Display exit message
+    printf "%b" "${RED}${message}${NC}\n\n"
+
+    # Bottom border + exit
+    printf "%b" "${RED}════════════════════════════════════════════════════════════════════════${NC}\n"
+    printf "%b" "${GREEN}Exiting gracefully...${NC}\n\n"
+    exit 1
 }
 
-# --------------------- Terminal Read Logic -------------------- #
-# Function for reading input with ESC key detection
 special_read() {
     local prompt="$1"
     local __varname="$2"
     local default_value="${3:-}"
-    local exit_on_esc="${4:-true}" # true = exit script, false = just return
+    local exit_on_esc="${4:-true}"
+
+    # Decode escape sequences (\033 → ESC)
+    prompt="$(echo -e "$prompt")"
 
     # Show prompt
-    echo -ne "$prompt   " >/dev/tty
+    printf "%b" "$prompt " >/dev/tty
 
     # Save terminal settings
-    local old_stty
     old_stty=$(stty -g </dev/tty)
-    stty raw -echo </dev/tty
 
-    # Read a single character to check for ESC
-    local char
-    IFS= read -r -n1 char </dev/tty
+    trap 'stty "$old_stty" </dev/tty' EXIT
 
-    # Check if ESC was pressed
-    if [[ "$char" == $'\e' ]]; then
-        stty "$old_stty" </dev/tty
-        echo >/dev/tty
+    # Set raw mode
+    stty -icanon -echo </dev/tty
 
-        if [[ "$exit_on_esc" == "true" ]]; then
-            exit_process "Escape pressed. Exiting gracefully." "$project_dir"
-        else
-            printf -v "$__varname" ""
-            return 1
-        fi
-    else
-        # Restore settings before reading full input
-        stty "$old_stty" </dev/tty
+    # Set a trap for signals to call your exit function
+    trap 'exit_process "Interrupted (Ctrl+C)." "$project_dir"' INT TERM
 
-        local input
-        if [[ -n "$char" && "$char" != $'\r' && "$char" != $'\n' ]]; then
-            input="$char"
-            read -e -i "$input" input </dev/tty
-            printf -v "$__varname" "%s" "$input"
-            return 0
-        else
-            printf -v "$__varname" "%s" "$default_value"
-            echo >/dev/tty
-            return 0
-        fi
-    fi
+    local input=""
+    local cursor_pos=${#input}
+
+    # Show default value if any
+    [[ -n "$input" ]] && printf "%s" "$input" >/dev/tty
+
+    # --- Input loop ---
+    while true; do
+        local char
+        IFS= read -r -n1 char </dev/tty
+        [[ "$char" == $'\r' ]] && char=$'\n'
+        # [[ "$char" == $'\0' ]] && continue
+        #printf 'XXD: '
+        #echo "$char" | xxd
+        #printf 'OD: char='
+        #echo -n "$char" | od -tx1 -a
+        case "$char" in
+        $'\e') # ESC or Arrow Key
+            local seq
+            IFS= read -r -n2 -t 0.01 seq </dev/tty
+
+            case "$seq" in
+            '[D') # Left
+                [[ $cursor_pos -gt 0 ]] && {
+                    printf "%s" "$MOVE_LEFT" >/dev/tty
+                    ((cursor_pos--))
+                }
+                ;;
+            '[C') # Right
+                [[ $cursor_pos -lt ${#input} ]] && {
+                    printf "%s" "$MOVE_RIGHT" >/dev/tty
+                    ((cursor_pos++))
+                }
+                ;;
+            '[H') # Home
+                printf "\e[%dD" "$cursor_pos" >/dev/tty
+                cursor_pos=0
+                ;;
+            '[F') # End
+                local move_forward=$((${#input} - cursor_pos))
+                ((move_forward > 0)) && printf "\e[%dC" "$move_forward" >/dev/tty
+                cursor_pos=${#input}
+                ;;
+            '[3') # Delete
+                if [[ $cursor_pos -lt ${#input} ]]; then
+                    input="${input:0:$cursor_pos}${input:$((cursor_pos + 1))}"
+                    printf "%b%s%s" "${CLEAR_LINE}\r" "$prompt " "$input" >/dev/tty
+                    local move_back=$((${#input} - cursor_pos))
+                    ((move_back > 0)) && printf "\e[%dD" "$move_back" >/dev/tty
+                fi
+                ;;
+            '') # Just a plain ESC
+                if [[ "$exit_on_esc" == "true" ]]; then
+                    exit_process "Escape pressed." "$project_dir"
+                else
+                    printf -v "$__varname" ""
+                    return 1 # trap EXIT will restore stty
+                fi
+                ;;
+            esac
+            ;;
+
+        $'\x7f' | $'\b') # Backspace
+            if [[ $cursor_pos -gt 0 ]]; then
+                input="${input:0:$((cursor_pos - 1))}${input:$cursor_pos}"
+                ((cursor_pos--))
+                printf "%b%s%s" "${CLEAR_LINE}\r" "$prompt " "$input" >/dev/tty
+                local move_back=$((${#input} - cursor_pos))
+                ((move_back > 0)) && printf "\e[%dD" "$move_back" >/dev/tty
+            fi
+            ;;
+
+        $'\n' | '') # Enter
+            printf "\n" >/dev/tty
+            echo >/dev/tty # Print newline
+            while IFS= read -r -n1 -t 0.01; do :; done </dev/tty
+
+            printf -v "$__varname" "%s" "${input:-$default_value}"
+            return 0 # trap EXIT will restore stty
+            ;;
+
+        $'\x04') # Ctrl+D (Delete)
+            if [[ $cursor_pos -lt ${#input} ]]; then
+                input="${input:0:$cursor_pos}${input:$((cursor_pos + 1))}"
+                printf "%b%s%s" "${CLEAR_LINE}\r" "$prompt " "$input" >/dev/tty
+                local move_back=$((${#input} - cursor_pos))
+                ((move_back > 0)) && printf "\e[%dD" "$move_back" >/dev/tty
+            fi
+            ;;
+
+        $'\x01') # Ctrl+A (Home)
+            printf "\e[%dD" "$cursor_pos" >/dev/tty
+            cursor_pos=0
+            ;;
+
+        $'\x05') # Ctrl+E (End)
+            local move_forward=$((${#input} - cursor_pos))
+            ((move_forward > 0)) && printf "\e[%dC" "$move_forward" >/dev/tty
+            cursor_pos=${#input}
+            ;;
+
+        $'\x0b') # Ctrl+K (Kill to end)
+            input="${input:0:$cursor_pos}"
+            printf "%b%s%s" "${CLEAR_LINE}\r" "$prompt " "$input" >/dev/tty
+            ;;
+
+        $'\x15') # Ctrl+U (Kill line)
+            input="${input:$cursor_pos}"
+            cursor_pos=0
+            printf "%b%s%s" "${CLEAR_LINE}\r" "$prompt " "$input" >/dev/tty
+            local move_back=${#input}
+            ((move_back > 0)) && printf "\e[%dD" "$move_back" >/dev/tty
+            ;;
+
+        *) # Normal char
+            [[ "$char" < $'\x20' ]] && continue
+            # Filter out non-printable control characters
+            if [[ "$char" > $'\x1f' ]]; then
+                input="${input:0:$cursor_pos}${char}${input:$cursor_pos}"
+                ((cursor_pos++))
+                printf "%b%s%s" "${CLEAR_LINE}\r" "$prompt " "$input" >/dev/tty
+                local move_back=$((${#input} - cursor_pos))
+                ((move_back > 0)) && printf "\e[%dD" "$move_back" >/dev/tty
+            fi
+            ;;
+        esac
+    done
 }
 
 # ---------------------- Tmux Logic ---------------------------- #
@@ -400,7 +533,7 @@ sessionize() {
 
 load_config() {
     if [[ -f "$CONFIG_FILE" ]]; then
-        CONFIG_JSON=$(cat "$CONFIG_FILE")
+        CONFIG_JSON=$(/bin/cat "$CONFIG_FILE")
     else
         CONFIG_JSON='{}'
     fi
@@ -514,6 +647,8 @@ main() {
 
     [[ -z "$selected_type" ]] && exit_process "No project type selected." "$project_dir"
 
+    color_echo GREEN "Project Template : $selected_type"
+
     # README + Gitignore
     readme_choice=$(get_value "readme" "${YELLOW}Create README.md? (Y/N):${NC}" "N")
     gitignore_choice=$(get_value "gitignore" "${YELLOW}Create .gitignore? (Y/N):${NC}" "N")
@@ -547,7 +682,9 @@ main() {
     if [[ "$dry_run" -eq 1 ]]; then
         color_echo YELLOW "[Dry Run] No Session Was Created"
     else
-        [[ "$session_choice" =~ ^[Nn]$ ]] || sessionize "$project_dir" "$selected_type"
+        if [[ "$session_choice" =~ ^[Yy]$ ]]; then
+            sessionize "$project_dir" "$selected_type"
+        fi
     fi
 
 }

@@ -11,7 +11,7 @@
       "licence": "MIT"
     },
     "python": {
-      "commands": ["uv venv"]
+      "commands": ["uv init {{project_name}}"]
     },
     "java": {
       "commands": [
@@ -47,10 +47,17 @@
       ]
     },
     "flutter": {
-      "commands": ["flutter create ."]
+      "commands": [
+        "mkdir app",
+        "cd app",
+        "flutter create --org com.{{project_name_lower}} ."
+      ]
     },
     "php": {
       "commands": ["laravel new ."]
+    },
+    "c": {
+      "commands": ["touch Makefile"]
     },
     "javascript": {
       "commands": ["npm init -y", "touch index.js"]
