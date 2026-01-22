@@ -15,8 +15,7 @@
     },
     "java": {
       "commands": [
-        "mkdir -p src",
-        "echo 'public class Main { public static void main(String[] args) { System.out.println(\"Hello World\"); } }' > src/Main.java"
+        "gradle init --overwrite --type java-application  --dsl kotlin"
       ]
     },
     "go": {
@@ -30,6 +29,9 @@
     },
     "rust": {
       "commands": ["cargo init"]
+    },
+    "rust-lib": {
+      "commands": ["cargo init --lib"]
     },
     "assembly": {
       "commands": ["touch main.asm", "echo '; Assembly entry point' > main.asm"]
@@ -47,6 +49,7 @@
       ]
     },
     "flutter": {
+      "gitignore": "N",
       "commands": [
         "mkdir app",
         "cd app",
