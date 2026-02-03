@@ -15,9 +15,15 @@
     },
     "java": {
       "commands": [
-        "gradle init --overwrite --type java-application  --dsl kotlin"
+        "gradle init --overwrite --type java-application  --dsl kotlin --project-name {{project_name}} --use-defaults"
       ]
     },
+    "kotlin": {
+      "commands": [
+        "gradle init --overwrite --type kotlin-application  --dsl kotlin --project-name {{project_name}} --use-defaults"
+      ]
+    },
+
     "go": {
       "commands": ["go mod init {{project_name}}", "touch .air.toml"],
       "licence": "GPL-3.0",
