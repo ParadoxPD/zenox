@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 
-CONFIG_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/zenox/.zenox.config.json"
+CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/zenox"
+PRIMARY_CONFIG_FILE="${CONFIG_DIR}/.zenox.config.json"
+LEGACY_CONFIG_FILE="${CONFIG_DIR}/config.json"
+CONFIG_FILE="$PRIMARY_CONFIG_FILE"
 
 # --------------------------- ANSI CODES --------------------------- #
 RED='\033[0;31m'
@@ -36,6 +39,16 @@ expand_path() {
     realpath -m "$input"
 }
 
+validate_project_name() {
+    local name="$1"
+    [[ -z "$name" ]] && return 1
+    [[ "$name" == "." || "$name" == ".." ]] && return 1
+    [[ "$name" == */* ]] && return 1
+    [[ "$name" =~ [[:space:]] ]] && return 1
+    [[ "$name" =~ [^A-Za-z0-9._-] ]] && return 1
+    return 0
+}
+
 show_help() {
     echo -e "\n\n ${CYAN}Zenox - Interactive Project Initializer${NC}
     ${BLUE}---------------------------------------${NC}
@@ -58,9 +71,9 @@ show_help() {
       • Automatic README.md, .gitignore, and LICENSE creation.
       • License templates fetched from GitHub API.
       • Optional tmux session creation.
-      • Configurable defaults via ~/.config/zenox/config.json.
+      • Configurable defaults via ~/.config/zenox/.zenox.config.json (or legacy config.json).
 
-    ${YELLOW}CONFIGURATION (~/.config/zenox/config.json):${NC}
+    ${YELLOW}CONFIGURATION (~/.config/zenox/.zenox.config.json):${NC}
       {
         \"defaults\": {
           \"gitignore\": \"Y\",
@@ -96,6 +109,10 @@ parse_flags() {
             ;;
         -n | --dry-run) dry_run=1 ;;
         -t | --template)
+            if [[ -z "${2:-}" || "${2:0:1}" == "-" ]]; then
+                color_echo "RED" "Error: --template requires a value."
+                exit 1
+            fi
             template="$2"
             shift
             ;;
@@ -109,10 +126,9 @@ parse_flags() {
         shift
     done
 
-    # Require at least interactive mode, a template, or both
+    # Default to interactive mode unless explicitly disabled in future flags.
     if [[ "${interactive:-0}" -ne 1 && -z "$template" ]]; then
-        color_echo "RED" "\n\nError: You must specify either --interactive (-i) or --template (-t), or both.\n\n"
-        exit 1
+        interactive=1
     fi
 }
 
@@ -155,32 +171,42 @@ EOF
 run_init() {
     local template="$1"
 
-    # 2) Run template-specific commands (if template used)
-    if [[ -n "$template" ]]; then
-        local cmds
-        template_config=$(get_config_value "$template" "commands")
+    # Run template-specific commands (config or built-in framework templates).
+    if [[ -z "$template" ]]; then
+        return
+    fi
+
+    local cmds=""
+    local template_config
+
+    template_config=$(get_config_value "$template" "commands")
+    if [[ -n "$template_config" ]]; then
         cmds=$(jq -r '.[]?' <<<"$template_config")
+    else
+        cmds=$(get_builtin_template_commands "$template")
+    fi
 
-        if [[ -n "$cmds" ]]; then
-            color_echo CYAN "Applying template commands for: $template"
-            while IFS= read -r cmd; do
-                [[ -z "$cmd" ]] && continue
+    if [[ -n "$cmds" ]]; then
+        color_echo CYAN "Applying template commands for: $template"
+        while IFS= read -r cmd; do
+            [[ -z "$cmd" ]] && continue
 
-                # Placeholder replacements
-                local project_name_lower="${project_name,,}"
-                cmd="${cmd//\{\{project_name\}\}/$project_name}"
-                cmd="${cmd//\{\{project_name_lower\}\}/$project_name_lower}"
-                cmd="${cmd//\{\{project_dir\}\}/$project_dir}"
-                cmd="${cmd//\{\{base_path\}\}/$base_path}"
+            # Placeholder replacements
+            local project_name_lower="${project_name,,}"
+            cmd="${cmd//\{\{project_name\}\}/$project_name}"
+            cmd="${cmd//\{\{project_name_lower\}\}/$project_name_lower}"
+            cmd="${cmd//\{\{project_dir\}\}/$project_dir}"
+            cmd="${cmd//\{\{base_path\}\}/$base_path}"
 
-                if [[ "$dry_run" -eq 1 ]]; then
-                    echo "[Dry Run] Command: $cmd"
-                else
-                    echo "$cmd"
-                    eval "$cmd"
+            if [[ "$dry_run" -eq 1 ]]; then
+                echo "[Dry Run] Command: $cmd"
+            else
+                echo "$cmd"
+                if ! (cd "$project_dir" && eval "$cmd"); then
+                    exit_process "Template command failed: $cmd" "$project_dir"
                 fi
-            done <<<"$cmds"
-        fi
+            fi
+        done <<<"$cmds"
     fi
 }
 
@@ -189,6 +215,7 @@ initialize_project() {
     local gi="$2"
     local readme="$3"
 
+    ensure_project_dir
     init_git_repo
 
     run_init "$type"
@@ -198,7 +225,7 @@ initialize_project() {
         if [[ "$dry_run" -eq 1 ]]; then
             echo "[Dry Run] echo '# $project_name' > README.md"
         else
-            echo "# $project_name" >README.md
+            echo "# $project_name" >"$project_dir/README.md" || exit_process "Failed to create README.md" "$project_dir"
             color_echo GREEN "Created README.md"
         fi
     fi
@@ -207,17 +234,19 @@ initialize_project() {
 
 init_git_repo() {
     color_echo CYAN "Initializing empty git repository..."
+    ensure_project_dir
 
     if [[ "$dry_run" -eq 1 ]]; then
         echo "[Dry Run] git init"
     else
-        git init
+        git init || exit_process "Failed to initialize git repository." "$project_dir"
     fi
 
     add_remote=$(get_value "git_remote" "${YELLOW}Do you want to add a remote repository? (Y/N):${NC}" "N")
     if [[ "$add_remote" =~ ^[Yy]$ ]]; then
         remote_name=$(get_value "git_remote_name" "${YELLOW}Enter remote name: ${NC}" "origin")
         remote_name=${remote_name:-origin}
+        [[ ! "$remote_name" =~ ^[A-Za-z0-9._-]+$ ]] && exit_process "Invalid remote name: '$remote_name'" "$project_dir"
 
         remote_uri=$(get_value "git_remote_uri" "${YELLOW}Enter remote URI: ${NC}" "")
         if [[ -z "$remote_uri" ]]; then
@@ -228,7 +257,7 @@ init_git_repo() {
         if [[ "$dry_run" -eq 1 ]]; then
             echo "[Dry Run] git remote add \"$remote_name\" \"$remote_uri\""
         else
-            git remote add "$remote_name" "$remote_uri"
+            git remote add "$remote_name" "$remote_uri" || exit_process "Failed to add git remote '$remote_name'." "$project_dir"
             color_echo GREEN "Remote '$remote_name' added successfully."
         fi
     fi
@@ -236,22 +265,390 @@ init_git_repo() {
 
 create_gitignore() {
     local type="$1"
-    if [[ "$dry_run" -eq 1 ]]; then
-        echo "[Dry Run] Creating .gitignore for $type"
-    else
-        # Get template from config
-        local template
-        template=$(jq -r --arg t "$type" '.templates[$t].gitignore // empty' "$CONFIG_FILE")
+    ensure_project_dir
 
-        if [[ -n "$template" && "$template" != "null" ]]; then
-            echo -e "$template" >.gitignore
-        else
-            # Generic default if config doesn't have template
-            echo -e "# Generic .gitignore\n*.log\n*.tmp\n.DS_Store\n.env*" >.gitignore
+    if [[ -f "$project_dir/.gitignore" ]]; then
+        color_echo YELLOW ".gitignore already exists; keeping existing file."
+        return
+    fi
+
+    if [[ "$dry_run" -eq 1 ]]; then
+        echo "[Dry Run] Creating .gitignore for $type (GitHub templates first, fallback otherwise)"
+    else
+        local templates=()
+        local config_templates_json
+        local config_legacy_gitignore
+        local builtins
+        local fetched_any=0
+        local output=""
+
+        config_templates_json=$(jq -r --arg t "$type" '.templates[$t].gitignore_templates // empty' <<<"$CONFIG_JSON")
+        if [[ -n "$config_templates_json" ]]; then
+            mapfile -t templates < <(jq -r '.[]?' <<<"$config_templates_json")
         fi
 
-        color_echo GREEN "Created .gitignore"
+        builtins=$(get_builtin_gitignore_templates "$type")
+        if [[ -n "$builtins" ]]; then
+            while IFS= read -r tmpl; do
+                [[ -n "$tmpl" ]] && templates+=("$tmpl")
+            done <<<"$builtins"
+        fi
+
+        if ((${#templates[@]} > 0)); then
+            local seen=" "
+            local uniq_templates=()
+            local tmpl
+            for tmpl in "${templates[@]}"; do
+                if [[ "$seen" != *" $tmpl "* ]]; then
+                    uniq_templates+=("$tmpl")
+                    seen+=" $tmpl "
+                fi
+            done
+
+            for tmpl in "${uniq_templates[@]}"; do
+                local template_body
+                template_body=$(fetch_github_gitignore_template "$tmpl")
+                if [[ -n "$template_body" ]]; then
+                    output+="# Source: github/gitignore/${tmpl}.gitignore"$'\n'
+                    output+="$template_body"$'\n\n'
+                    fetched_any=1
+                fi
+            done
+        fi
+
+        if [[ "$fetched_any" -eq 1 ]]; then
+            printf "%s" "$output" >"$project_dir/.gitignore" || exit_process "Failed to write .gitignore." "$project_dir"
+            color_echo GREEN "Created .gitignore from GitHub templates."
+            return
+        fi
+
+        config_legacy_gitignore=$(jq -r --arg t "$type" '.templates[$t].gitignore // empty' <<<"$CONFIG_JSON")
+        if [[ -n "$config_legacy_gitignore" && "$config_legacy_gitignore" != "null" ]]; then
+            printf "%s\n" "$config_legacy_gitignore" >"$project_dir/.gitignore" || exit_process "Failed to write .gitignore fallback." "$project_dir"
+            color_echo YELLOW "GitHub template unavailable; used template-config gitignore fallback."
+            return
+        fi
+
+        generate_generic_gitignore "$type" >"$project_dir/.gitignore" || exit_process "Failed to write generic .gitignore fallback." "$project_dir"
+        color_echo YELLOW "GitHub template unavailable; created generic fallback .gitignore."
     fi
+}
+
+fetch_github_gitignore_template() {
+    local template="$1"
+    [[ -z "$template" ]] && return 1
+    [[ ! "$template" =~ ^[A-Za-z0-9._/-]+$ ]] && return 1
+
+    curl -fsSL "https://raw.githubusercontent.com/github/gitignore/main/${template}.gitignore" 2>/dev/null
+}
+
+get_builtin_gitignore_templates() {
+    local type="$1"
+    case "$type" in
+    react-vite | vue-vite | sveltekit | nextjs | nuxt | remix | t3-stack | express-api) printf "%s\n" "Node" ;;
+    django | fastapi | flask-api) printf "%s\n" "Python" ;;
+    spring-boot) printf "%s\n" "Java" ;;
+    laravel | php-api) printf "%s\n" "PHP" ;;
+    rails-api | rails-fullstack) printf "%s\n" "Ruby" ;;
+    dotnet-webapi | aspnet-fullstack | maui) printf "%s\n" "VisualStudio" "CSharp" ;;
+    rust-axum | tauri-app) printf "%s\n" "Rust" ;;
+    go-fiber | go-gin) printf "%s\n" "Go" ;;
+    flutter-app) printf "%s\n" "Dart" ;;
+    react-express | vue-fastapi | go-react-stack) printf "%s\n" "Node" ;;
+    *)
+        # Fallback mapping for simple names that often match language templates.
+        case "${type,,}" in
+        *node* | *express* | *next* | *nuxt* | *react* | *vue* | *svelte* | *remix* | *js* | *ts*) printf "%s\n" "Node" ;;
+        *python* | *django* | *flask* | *fastapi*) printf "%s\n" "Python" ;;
+        *go*) printf "%s\n" "Go" ;;
+        *rust*) printf "%s\n" "Rust" ;;
+        *java* | *spring*) printf "%s\n" "Java" ;;
+        *php* | *laravel*) printf "%s\n" "PHP" ;;
+        *ruby* | *rails*) printf "%s\n" "Ruby" ;;
+        *dotnet* | *csharp* | *aspnet*) printf "%s\n" "VisualStudio" "CSharp" ;;
+        *flutter* | *dart*) printf "%s\n" "Dart" ;;
+        *) ;;
+        esac
+        ;;
+    esac
+}
+
+generate_generic_gitignore() {
+    local type="$1"
+    cat <<EOF
+# Generic .gitignore fallback for ${type}
+.DS_Store
+Thumbs.db
+*.log
+*.tmp
+*.swp
+.env
+.env.*
+dist/
+build/
+coverage/
+node_modules/
+__pycache__/
+.pytest_cache/
+.venv/
+target/
+bin/
+EOF
+}
+
+get_builtin_template_commands() {
+    local type="$1"
+    case "$type" in
+    react-vite)
+        cat <<'EOF'
+npm create vite@latest . -- --template react
+npm install
+EOF
+        ;;
+    vue-vite)
+        cat <<'EOF'
+npm create vite@latest . -- --template vue
+npm install
+EOF
+        ;;
+    sveltekit)
+        cat <<'EOF'
+npm create svelte@latest .
+npm install
+EOF
+        ;;
+    nextjs)
+        cat <<'EOF'
+npx create-next-app@latest .
+EOF
+        ;;
+    nuxt)
+        cat <<'EOF'
+npx nuxi@latest init .
+npm install
+EOF
+        ;;
+    remix)
+        cat <<'EOF'
+npx create-remix@latest .
+EOF
+        ;;
+    t3-stack)
+        cat <<'EOF'
+npx create-t3-app@latest .
+EOF
+        ;;
+    express-api)
+        cat <<'EOF'
+npm init -y
+npm install express cors dotenv
+EOF
+        ;;
+    fastapi)
+        cat <<'EOF'
+python -m venv .venv
+. .venv/bin/activate && pip install fastapi uvicorn
+EOF
+        ;;
+    django)
+        cat <<'EOF'
+python -m venv .venv
+. .venv/bin/activate && pip install django && django-admin startproject config .
+EOF
+        ;;
+    flask-api)
+        cat <<'EOF'
+python -m venv .venv
+. .venv/bin/activate && pip install flask
+EOF
+        ;;
+    spring-boot)
+        cat <<'EOF'
+curl -fsSL "https://start.spring.io/starter.zip?type=maven-project&language=java&name={{project_name}}&artifactId={{project_name_lower}}&dependencies=web,data-jpa,postgresql" -o starter.zip
+unzip -oq starter.zip
+rm -f starter.zip
+shopt -s dotglob nullglob && mv {{project_name}}/* . 2>/dev/null || true
+rm -rf {{project_name}}
+EOF
+        ;;
+    laravel)
+        cat <<'EOF'
+composer create-project laravel/laravel .
+EOF
+        ;;
+    rails-api)
+        cat <<'EOF'
+rails new . --api
+EOF
+        ;;
+    php-api)
+        cat <<'EOF'
+composer init --name="{{project_name_lower}}/api" --no-interaction
+EOF
+        ;;
+    dotnet-webapi)
+        cat <<'EOF'
+dotnet new webapi
+EOF
+        ;;
+    go-fiber)
+        cat <<'EOF'
+go mod init {{project_name_lower}}
+go get github.com/gofiber/fiber/v2
+EOF
+        ;;
+    go-gin)
+        cat <<'EOF'
+go mod init {{project_name_lower}}
+go get github.com/gin-gonic/gin
+EOF
+        ;;
+    rust-axum)
+        cat <<'EOF'
+cargo init .
+cargo add axum tokio --features tokio/full
+EOF
+        ;;
+    react-express)
+        cat <<'EOF'
+mkdir -p frontend backend
+(cd frontend && npm create vite@latest . -- --template react && npm install)
+(cd backend && npm init -y && npm install express cors dotenv)
+EOF
+        ;;
+    vue-fastapi)
+        cat <<'EOF'
+mkdir -p frontend backend
+(cd frontend && npm create vite@latest . -- --template vue && npm install)
+(cd backend && python -m venv .venv && . .venv/bin/activate && pip install fastapi uvicorn)
+EOF
+        ;;
+    go-react-stack)
+        cat <<'EOF'
+mkdir -p frontend backend
+(cd frontend && npm create vite@latest . -- --template react && npm install)
+(cd backend && go mod init {{project_name_lower}}/backend && go get github.com/gin-gonic/gin)
+EOF
+        ;;
+    rails-fullstack)
+        cat <<'EOF'
+rails new .
+EOF
+        ;;
+    aspnet-fullstack)
+        cat <<'EOF'
+dotnet new mvc
+EOF
+        ;;
+    tauri-app)
+        cat <<'EOF'
+npm create vite@latest . -- --template react
+npm install
+npm install -D @tauri-apps/cli
+npm install @tauri-apps/api
+EOF
+        ;;
+    flutter-app)
+        cat <<'EOF'
+flutter create .
+EOF
+        ;;
+    maui)
+        cat <<'EOF'
+dotnet new maui
+EOF
+        ;;
+    *) ;;
+    esac
+}
+
+select_framework_template() {
+    local category
+    category=$(printf "%s\n" \
+        "Frontend Frameworks" \
+        "Backend Frameworks" \
+        "Full-Stack (Frontend + Backend)" \
+        "Cross-Platform & Native" |
+        fzf --prompt="Select framework category: " --height=12 --border --reverse --ansi)
+
+    [[ -z "$category" ]] && return 1
+
+    local framework=""
+    case "$category" in
+    "Frontend Frameworks")
+        framework=$(printf "%s\n" "react-vite" "vue-vite" "sveltekit" "nextjs" "nuxt" "remix" |
+            fzf --prompt="Select frontend framework: " --height=12 --border --reverse --ansi)
+        ;;
+    "Backend Frameworks")
+        framework=$(printf "%s\n" "express-api" "fastapi" "django" "flask-api" "spring-boot" "laravel" "rails-api" "dotnet-webapi" "go-fiber" "go-gin" "rust-axum" |
+            fzf --prompt="Select backend framework: " --height=14 --border --reverse --ansi)
+        ;;
+    "Full-Stack (Frontend + Backend)")
+        framework=$(printf "%s\n" "react-express" "vue-fastapi" "go-react-stack" "t3-stack" "rails-fullstack" "aspnet-fullstack" |
+            fzf --prompt="Select full-stack preset: " --height=12 --border --reverse --ansi)
+        ;;
+    "Cross-Platform & Native")
+        framework=$(printf "%s\n" "tauri-app" "flutter-app" "maui" |
+            fzf --prompt="Select app framework: " --height=10 --border --reverse --ansi)
+        ;;
+    esac
+
+    [[ -n "$framework" ]] && {
+        printf "%s\n" "$framework"
+        return 0
+    }
+    return 1
+}
+
+select_project_type() {
+    local selected=""
+    local config_options=()
+
+    mapfile -t config_options < <(jq -r '.templates | keys[]?' <<<"$CONFIG_JSON")
+
+    if [[ -n "$template" ]]; then
+        if [[ -n "$(jq -r --arg t "$template" '.templates[$t] // empty' <<<"$CONFIG_JSON")" ]]; then
+            printf "%s\n" "$template"
+            return 0
+        fi
+
+        if [[ -n "$(get_builtin_template_commands "$template")" ]]; then
+            printf "%s\n" "$template"
+            return 0
+        fi
+
+        color_echo RED "Template '$template' was not found in config or built-in frameworks."
+        return 1
+    fi
+
+    local selection_mode
+    if ((${#config_options[@]} > 0)); then
+        selection_mode=$(printf "%s\n" \
+            "Template presets (Language Template defined in zenox config)" \
+            "Framework presets (Built-in framework scaffolds and stacks)" |
+            fzf --prompt="Select project source: " --height=8 --border --reverse --ansi)
+    else
+        selection_mode="Framework presets (Built-in framework scaffolds and stacks)"
+    fi
+
+    case "$selection_mode" in
+    "Template presets (Language Template defined in zenox config)")
+        selected=$(printf "%s\n" "${config_options[@]}" |
+            fzf --prompt="Select project type: " --height=15 --border --reverse --ansi)
+        ;;
+    "Framework presets (Built-in framework scaffolds and stacks)")
+        selected=$(select_framework_template)
+        ;;
+    *)
+        selected=""
+        ;;
+    esac
+
+    [[ -n "$selected" ]] && {
+        printf "%s\n" "$selected"
+        return 0
+    }
+    return 1
 }
 
 # -------------------- License Logic --------------------------- #
@@ -308,7 +705,8 @@ set_licence() {
     if [[ "$dry_run" -eq 1 ]]; then
         echo "[Dry Run] Would write LICENSE file for $selected_licence"
     else
-        echo "$license_text" >LICENSE
+        ensure_project_dir
+        echo "$license_text" >"$project_dir/LICENSE" || exit_process "Failed to write LICENSE file." "$project_dir"
         color_echo GREEN "LICENSE file created using $selected_licence."
     fi
 }
@@ -361,6 +759,18 @@ exit_process() {
     printf "%b" "${RED}════════════════════════════════════════════════════════════════════════${NC}\n"
     printf "%b" "${GREEN}Exiting gracefully...${NC}\n\n"
     exit 1
+}
+
+ensure_project_dir() {
+    if [[ "$dry_run" -eq 1 ]]; then
+        return
+    fi
+
+    if [[ -z "${project_dir:-}" || ! -d "$project_dir" ]]; then
+        exit_process "Project directory is not available: ${project_dir:-<unset>}"
+    fi
+
+    cd "$project_dir" || exit_process "Failed to enter project directory: $project_dir" "$project_dir"
 }
 
 special_read() {
@@ -532,7 +942,11 @@ sessionize() {
 # ------------------------ Config Logic ------------------------ #
 
 load_config() {
-    if [[ -f "$CONFIG_FILE" ]]; then
+    if [[ -f "$PRIMARY_CONFIG_FILE" ]]; then
+        CONFIG_FILE="$PRIMARY_CONFIG_FILE"
+        CONFIG_JSON=$(/bin/cat "$CONFIG_FILE")
+    elif [[ -f "$LEGACY_CONFIG_FILE" ]]; then
+        CONFIG_FILE="$LEGACY_CONFIG_FILE"
         CONFIG_JSON=$(/bin/cat "$CONFIG_FILE")
     else
         CONFIG_JSON='{}'
@@ -612,12 +1026,16 @@ main() {
 
     [[ -z "$base_path" ]] && exit_process "No base path selected."
     base_path=$(expand_path "$base_path")
+    [[ ! -d "$base_path" ]] && exit_process "Selected base path does not exist: $base_path"
+    [[ ! -w "$base_path" ]] && exit_process "Selected base path is not writable: $base_path"
     color_echo GREEN "Base Directory: $base_path"
 
     # Project name
     project_name=""
     special_read "${YELLOW}Enter the project name:${NC}" project_name ""
-    [[ -z "$project_name" ]] && exit_process "Project name cannot be empty."
+    if ! validate_project_name "$project_name"; then
+        exit_process "Invalid project name '$project_name'. Allowed: letters, numbers, ., _, - and no spaces/slashes."
+    fi
     project_dir="$base_path/$project_name"
     [[ -d "$project_dir" ]] && exit_process "Project already exists." "$project_dir"
 
@@ -629,20 +1047,9 @@ main() {
     fi
 
     # Project type
-    if [[ -n "$template" && -n "$(jq -r --arg t "$template" '.templates[$t] // empty' <<<"$CONFIG_JSON")" ]]; then
-        # Template exists — use its key name as the type
-        selected_type="$template"
-    fi
-
+    selected_type=$(select_project_type)
     if [[ -z "$selected_type" ]]; then
         selected_type=$(jq -r '.defaults.template // empty' <<<"$CONFIG_JSON")
-    fi
-
-    if [[ -z "$selected_type" ]]; then
-
-        mapfile -t types < <(jq -r '.templates | keys[]' <<<"$CONFIG_JSON")
-        selected_type=$(printf "%s\n" "${types[@]}" |
-            fzf --prompt="Select project type: " --height=15 --border --reverse --ansi)
     fi
 
     [[ -z "$selected_type" ]] && exit_process "No project type selected." "$project_dir"

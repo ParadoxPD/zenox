@@ -37,7 +37,7 @@ It provides a guided, TUI-driven setup process that handles directory creation, 
 - **Automatic `.gitignore` generation** for supported languages.
 - **License auto-fetching** from GitHub’s license API:
   - Supports MIT, Apache-2.0, GPL-3.0, BSD variants, LGPL, AGPL, MPL, CC0, Unlicense, EPL-2.0, etc.
-- **Configurable defaults** via `~/.config/zenox/.zenox.config.json`:
+- **Configurable defaults** via `~/.config/zenox/.zenox.config.json` (legacy: `~/.config/zenox/config.json`):
   - Default project type
   - Default license
   - Default base path
@@ -102,7 +102,7 @@ zenox [options]
 
 ## 🛠 Configuration
 
-You can create a `$XDG_CONFIG_HOME/zenox/config.json` file to define defaults:
+You can create a `$XDG_CONFIG_HOME/zenox/.zenox.config.json` file to define defaults:
 
 ```json
 {
